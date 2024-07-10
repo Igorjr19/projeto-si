@@ -20,6 +20,12 @@ def receive_messages(client_socket):
         print("Enter message to send: ", end="", flush=True)
 
 
+def send_message():
+    # TODO - Implementar a criptografia da mensagem
+    # Envia mensagens para o servidor
+    message = input("Enter message to send: ")
+    return message
+
 def start_client():
     # Conecta ao servidor
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -34,6 +40,10 @@ def start_client():
             key = " ".join(lines)
             # Por algum motivo só envia correto se eu printar a chave
             print("Sending key: ", key)
+            if (len(lines) == 0):
+                print("Client not registered.")
+                client_socket.close()
+                return
             client_socket.send(key.encode())
             data = client_socket.recv(1024).decode()
             # Verifica se a autenticação foi bem sucedida
@@ -54,7 +64,6 @@ def start_client():
                 client_socket.close()
                 return
             elif data == "Client registered successfully":
-                print(data)
                 # Recebe as chaves de Diffie-Hellman do servidor
                 data = client_socket.recv(1024).decode()
                 p, g, server_public_key = data.split()
@@ -72,13 +81,12 @@ def start_client():
                 # Salva a chave compartilhada no arquivo do cliente
                 with open(name + "_shared_key.txt", "w") as f_shared_key:
                     f_shared_key.write(str(shared_key))
-                    
-
                 # Recebe a chave pública RSA do servidor e salva no arquivo do cliente
                 key = client_socket.recv(20000).decode()
+                print("Received key: ", key)
                 f.write(key)
                 print("Key saved.")
-            print("Client registered successfully. You can now send messages." + "\n")
+                print("Client registered successfully. You can now send messages." + "\n")
 
     # Inicia a thread para receber mensagens
     receive_thread = threading.Thread(target=receive_messages, args=(client_socket,))
@@ -87,7 +95,7 @@ def start_client():
     # Envia mensagens para o servidor
     while True:
         # TODO - Encriptar a mensagem
-        message = input("Enter message to send: ")
+        message = send_message()
         if message == "exit":
             break
         client_socket.send(message.encode())

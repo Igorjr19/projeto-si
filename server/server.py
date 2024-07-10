@@ -87,6 +87,8 @@ def save_keys(client_name, private_key, public_key, filename):
 
 
 def send_message(message, dest, clients):
+    # TODO - Encriptar a mensagem
+    # Criptografando e enviando a mensagem para o destinatário
     for client in clients:
         if client["name"] == dest:
             client["socket"].send(message.encode())
@@ -134,16 +136,23 @@ def handle_client(client_socket, rsa_keys, dh_keys):
 
     # Verificando se o cliente é conhecido
     known = False
-    for known_client in known_clients:
+    for known_client in known_clients:      
         if known_client["name"] == client["name"]:
             known = True
             break
 
     if operation == "login" and known:
         data = client_socket.recv(20000)
+        known = False
         for known_client in known_clients:
             if known_client["name"] == client["name"]:
+                known = True
                 break
+        if not known:
+            print("Client", client["name"], "not registered.")
+            client_socket.send("Client not registered".encode())
+            client_socket.close()
+            return
         dh_key = dh_keys[client["name"]]
         client_key = RSA.import_key(data.decode(), passphrase=dh_key)
         # Verificando se a chave do cliente é a mesma que a chave conhecida
@@ -167,19 +176,20 @@ def handle_client(client_socket, rsa_keys, dh_keys):
             # Gerando as chaves de Diffie-Hellman
             dh_key = generate_dh_keys(client_socket, client["name"])
             # Gerando as chaves RSA
-            key = RSA.generate(1024)
-            # TODO - Fazer de forma segura
-            # Enviando a chave RSA para o cliente
-            client_socket.send(key.export_key().decode().encode())
+            rsa_key = RSA.generate(1024)
+            # Enviando a chave RSA criptografada a partir de sua chave compartilhada (Diffie-Hellman) para o cliente 
+            print("Sending RSA key to client", client["name"])
+            print("RSA key:", rsa_key.export_key().decode())
+            client_socket.send(rsa_key.export_key().decode().encode())
             # Encriptando e salvando as chaves
             encrypt_and_save_keys(
-                client["name"], key, client_keys_file, dh_key
+                client["name"], rsa_key, client_keys_file, dh_key
             )
             # Adicionando o cliente à lista de clientes conhecidos
             new_client = {
                 "name": client["name"],
-                "private_key": key,
-                "public_key": key.publickey(),
+                "private_key": rsa_key,
+                "public_key": rsa_key.publickey(),
             }
             known_clients.append(new_client)
             print("Client", client["name"], "registered.")
@@ -192,6 +202,7 @@ def handle_client(client_socket, rsa_keys, dh_keys):
 
     # Recebendo mensagens do cliente
     while True:
+        # TODO - Desencriptar a mensagem do cliente A e enviar para o cliente B encriptada
         data = client_socket.recv(1024)
         if not data:
             break
@@ -209,16 +220,11 @@ def start_server():
     server_socket.listen(5)
     print("Server started. Listening on port 8888...")
 
-    # Lendo a chave secreta do arquivo
-    # secret_client_keys = open(secret_client_keys_file, "rb").read().decode()
-    # secret_client_keys = bytes.fromhex(secret_client_keys)
-
     # Carregando as chaves dos clientes do arquivo criptografado
     rsa_keys, dh_keys = load_keys(client_keys_file, dh_keys_file)
     if rsa_keys is not None:
         for key in rsa_keys:
-            known_clients.append(key["name"])
-
+            known_clients.append(key)
     # Aceitando conexões de clientes
     while True:
         client_socket, client_address = server_socket.accept()
