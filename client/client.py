@@ -2,7 +2,12 @@ import socket
 import threading
 import sys
 from diffie_hellman import *
+from Crypto.Random import get_random_bytes
 from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Cipher import AES
+import time
 
 operation = sys.argv[1]
 name = sys.argv[2]
@@ -26,34 +31,43 @@ def send_message():
     message = input("Enter message to send: ")
     return message
 
+
 def start_client():
     # Conecta ao servidor
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((server_host, 8888))
     print("Connected to server.")
 
+    rsa_key = ""
+    dh_key = ""
+
     # Envia o nome do cliente e o destinatário
     client_socket.send(operation.encode() + b" " + name.encode() + b" " + dest.encode())
     if operation == "login":
         with open(name + ".pem", "r") as f:
-            lines = f.readlines()
-            key = " ".join(lines)
-            # Por algum motivo só envia correto se eu printar a chave
-            print("Sending key: ", key)
-            if (len(lines) == 0):
-                print("Client not registered.")
-                client_socket.close()
-                return
-            client_socket.send(key.encode())
-            data = client_socket.recv(1024).decode()
-            # Verifica se a autenticação foi bem sucedida
-            if data == "Failed to authenticate":
+            with open(name + "_shared_key.txt", "r") as f_shared_key:
+                shared_key = f_shared_key.read()
+                rsa_key = f.read()
+                rsa_key = RSA.import_key(rsa_key, passphrase=shared_key)
+
+                session_key = get_random_bytes(16)
+
+                cipher_rsa = PKCS1_OAEP.new(rsa_key.public_key())
+                enc_session_key = cipher_rsa.encrypt(session_key)
+
+                cipher_aes = AES.new(session_key, AES.MODE_EAX)
+                auth_message = "auth".encode()
+                cipher_text = cipher_aes.encrypt(auth_message)
+                
+                nonce = cipher_aes.nonce
+                client_socket.send(enc_session_key)
+                time.sleep(0.01)
+                client_socket.send(cipher_text)
+                time.sleep(0.01)
+                client_socket.send(nonce)
+                data = client_socket.recv(1024).decode()
                 print(data)
-                # Encerra a conexão caso a autenticação falhe
-                client_socket.close()
-                return
-            elif data == "Authentication successful":
-                print(data + ". You can now send messages." + "\n")
+
     elif operation == "register":
         with open(name + ".pem", "w") as f:
             data = client_socket.recv(1024).decode()
@@ -86,7 +100,11 @@ def start_client():
                 print("Received key: ", key)
                 f.write(key)
                 print("Key saved.")
-                print("Client registered successfully. You can now send messages." + "\n")
+                print("Client registered successfully.")
+                print("Login to start sending messages.")
+                # Encerra a conexão
+                client_socket.close()
+                return
 
     # Inicia a thread para receber mensagens
     receive_thread = threading.Thread(target=receive_messages, args=(client_socket,))

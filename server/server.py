@@ -3,6 +3,8 @@ import threading
 from Crypto.PublicKey import RSA
 from diffie_hellman import *
 from Crypto.Hash import SHA256
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Cipher import AES
 
 server_host = "localhost"
 secret_client_keys_file = "./secret_client_keys.txt"
@@ -22,7 +24,7 @@ def load_keys(rsa_keys_file, dh_keys_file):
             if not name:
                 break
             shared_key = file.readline().strip()
-            
+
             dh_keys[name] = shared_key
     rsa_keys = []
     with open(rsa_keys_file, "r") as file:
@@ -136,38 +138,33 @@ def handle_client(client_socket, rsa_keys, dh_keys):
 
     # Verificando se o cliente é conhecido
     known = False
-    for known_client in known_clients:      
+    current_client = None
+    for known_client in known_clients:
         if known_client["name"] == client["name"]:
             known = True
+            current_client = known_client
             break
 
     if operation == "login" and known:
-        data = client_socket.recv(20000)
-        known = False
-        for known_client in known_clients:
-            if known_client["name"] == client["name"]:
-                known = True
-                break
-        if not known:
-            print("Client", client["name"], "not registered.")
-            client_socket.send("Client not registered".encode())
+        enc_session_key = client_socket.recv(1024)
+        cipher_text = client_socket.recv(1024)
+        nonce = client_socket.recv(1024)
+        
+        rsa_key = current_client["private_key"]
+        cipher_rsa = PKCS1_OAEP.new(rsa_key)
+        
+        session_key = cipher_rsa.decrypt(enc_session_key)
+        cipher_aes = AES.new(session_key, AES.MODE_EAX, nonce)
+        message = cipher_aes.decrypt(cipher_text)
+        plaintext = message.decode()
+        if plaintext == "auth":
+            print("Client", client["name"], "authenticated.")
+            client_socket.send("Client authenticated".encode())
+        else:
+            print("Client", client["name"], "failed to authenticate.")
+            client_socket.send("Client failed to authenticate".encode())
             client_socket.close()
             return
-        dh_key = dh_keys[client["name"]]
-        client_key = RSA.import_key(data.decode(), passphrase=dh_key)
-        # Verificando se a chave do cliente é a mesma que a chave conhecida
-        if (
-            client_key.publickey().export_key()
-            == known_client["public_key"].export_key()
-        ):
-            # Enviando a confirmação de autenticação
-            print("Client", client["name"], "logged in.")
-            client_socket.send("Authentication successful".encode())
-        else:
-            # Enviando a falha de autenticação e encerrando a conexão
-            print("Client", client["name"], "failed to log in.")
-            client_socket.send("Failed to authenticate".encode())
-            client_socket.close()
 
     elif operation == "register":
         # Caso o cliente não seja conhecido
@@ -177,14 +174,12 @@ def handle_client(client_socket, rsa_keys, dh_keys):
             dh_key = generate_dh_keys(client_socket, client["name"])
             # Gerando as chaves RSA
             rsa_key = RSA.generate(1024)
-            # Enviando a chave RSA criptografada a partir de sua chave compartilhada (Diffie-Hellman) para o cliente 
+            # Enviando a chave RSA criptografada a partir de sua chave compartilhada (Diffie-Hellman) para o cliente
             print("Sending RSA key to client", client["name"])
             print("RSA key:", rsa_key.export_key().decode())
             client_socket.send(rsa_key.export_key().decode().encode())
             # Encriptando e salvando as chaves
-            encrypt_and_save_keys(
-                client["name"], rsa_key, client_keys_file, dh_key
-            )
+            encrypt_and_save_keys(client["name"], rsa_key, client_keys_file, dh_key)
             # Adicionando o cliente à lista de clientes conhecidos
             new_client = {
                 "name": client["name"],
@@ -230,7 +225,12 @@ def start_server():
         client_socket, client_address = server_socket.accept()
         print("Accepted connection from:", client_address)
         client_thread = threading.Thread(
-            target=handle_client, args=(client_socket, rsa_keys, dh_keys,)
+            target=handle_client,
+            args=(
+                client_socket,
+                rsa_keys,
+                dh_keys,
+            ),
         )
         client_thread.start()
 
