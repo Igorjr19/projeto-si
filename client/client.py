@@ -2,6 +2,7 @@ import socket
 import threading
 import sys
 from diffie_hellman import *
+from Crypto.Hash import SHA256
 
 operation = sys.argv[1]
 name = sys.argv[2]
@@ -66,10 +67,13 @@ def start_client():
                 shared_key = compute_shared_secret_dh(
                     int(server_public_key), private_key, int(p)
                 )
+                # Utilizando SHA-256 para gerar a chave simétrica
+                shared_key = SHA256.new(str(shared_key).encode()).hexdigest()
                 # Salva a chave compartilhada no arquivo do cliente
                 with open(name + "_shared_key.txt", "w") as f_shared_key:
                     f_shared_key.write(str(shared_key))
-                
+                    
+
                 # Recebe a chave pública RSA do servidor e salva no arquivo do cliente
                 key = client_socket.recv(20000).decode()
                 f.write(key)
@@ -82,6 +86,7 @@ def start_client():
 
     # Envia mensagens para o servidor
     while True:
+        # TODO - Encriptar a mensagem
         message = input("Enter message to send: ")
         if message == "exit":
             break
