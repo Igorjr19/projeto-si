@@ -15,21 +15,47 @@ dest = sys.argv[3]
 server_host = "localhost"
 
 
-def receive_messages(client_socket):
+def recieve_message(client_socket, rsa_key):
+    enc_session_key = client_socket.recv(1024)
+    if not enc_session_key:
+        return None
+    cipher_text = client_socket.recv(1024)
+    nonce = client_socket.recv(1024)
+    
+    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    
+    session_key = cipher_rsa.decrypt(enc_session_key)
+    cipher_aes = AES.new(session_key, AES.MODE_EAX, nonce)
+    message = cipher_aes.decrypt(cipher_text)
+    plaintext = message.decode()
+    return plaintext
+
+def receive_messages(client_socket, rsa_key):
+    # TODO
     # Recebe mensagens do servidor
     while True:
-        data = client_socket.recv(1024)
+        data = recieve_message(client_socket, rsa_key)
         if not data:
             break
-        print("\nReceived message from", data.decode())
+        print("\nReceived message from", data)
         print("Enter message to send: ", end="", flush=True)
 
 
-def send_message():
-    # TODO - Implementar a criptografia da mensagem
-    # Envia mensagens para o servidor
-    message = input("Enter message to send: ")
-    return message
+def send_message(client_socket, message, rsa_key):
+    session_key = get_random_bytes(16)
+    cipher_rsa = PKCS1_OAEP.new(rsa_key.public_key())
+    enc_session_key = cipher_rsa.encrypt(session_key)
+
+    cipher_aes = AES.new(session_key, AES.MODE_EAX)
+    message = message.encode()
+    cipher_text = cipher_aes.encrypt(message)
+    
+    nonce = cipher_aes.nonce
+    client_socket.send(enc_session_key)
+    time.sleep(0.01)
+    client_socket.send(cipher_text)
+    time.sleep(0.01)
+    client_socket.send(nonce)
 
 
 def start_client():
@@ -49,24 +75,9 @@ def start_client():
                 shared_key = f_shared_key.read()
                 rsa_key = f.read()
                 rsa_key = RSA.import_key(rsa_key, passphrase=shared_key)
-
-                session_key = get_random_bytes(16)
-
-                cipher_rsa = PKCS1_OAEP.new(rsa_key.public_key())
-                enc_session_key = cipher_rsa.encrypt(session_key)
-
-                cipher_aes = AES.new(session_key, AES.MODE_EAX)
-                auth_message = "auth".encode()
-                cipher_text = cipher_aes.encrypt(auth_message)
-                
-                nonce = cipher_aes.nonce
-                client_socket.send(enc_session_key)
-                time.sleep(0.01)
-                client_socket.send(cipher_text)
-                time.sleep(0.01)
-                client_socket.send(nonce)
+                send_message(client_socket, "auth", rsa_key)
                 data = client_socket.recv(1024).decode()
-                print(data)
+
 
     elif operation == "register":
         with open(name + ".pem", "w") as f:
@@ -107,16 +118,15 @@ def start_client():
                 return
 
     # Inicia a thread para receber mensagens
-    receive_thread = threading.Thread(target=receive_messages, args=(client_socket,))
+    receive_thread = threading.Thread(target=receive_messages, args=(client_socket, rsa_key))
     receive_thread.start()
 
     # Envia mensagens para o servidor
     while True:
-        # TODO - Encriptar a mensagem
-        message = send_message()
+        message = input("Enter message to send: ")
         if message == "exit":
             break
-        client_socket.send(message.encode())
+        send_message(client_socket, message, rsa_key)
 
     client_socket.close()
 

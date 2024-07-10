@@ -5,6 +5,8 @@ from diffie_hellman import *
 from Crypto.Hash import SHA256
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+import time
 
 server_host = "localhost"
 secret_client_keys_file = "./secret_client_keys.txt"
@@ -88,13 +90,34 @@ def save_keys(client_name, private_key, public_key, filename):
         file.write(public_key + "\n\n")
 
 
-def send_message(message, dest, clients):
-    # TODO - Encriptar a mensagem
+def send_message(message, dest, clients, known_clients):
     # Criptografando e enviando a mensagem para o destinatário
+    client_socket = None
+    rsa_key = None
     for client in clients:
         if client["name"] == dest:
-            client["socket"].send(message.encode())
+            client_socket = client["socket"]
             break
+    for known_client in known_clients:
+        if known_client["name"] == dest:
+            rsa_key = known_client["public_key"]
+            break
+    if not rsa_key or not client_socket:
+        return
+    session_key = get_random_bytes(16)
+    cipher_rsa = PKCS1_OAEP.new(rsa_key.public_key())
+    enc_session_key = cipher_rsa.encrypt(session_key)
+
+    cipher_aes = AES.new(session_key, AES.MODE_EAX)
+    message = message.encode()
+    cipher_text = cipher_aes.encrypt(message)
+    
+    nonce = cipher_aes.nonce
+    client_socket.send(enc_session_key)
+    time.sleep(0.01)
+    client_socket.send(cipher_text)
+    time.sleep(0.01)
+    client_socket.send(nonce)
 
 
 def generate_dh_keys(client_socket, client_name):
@@ -121,6 +144,21 @@ def generate_dh_keys(client_socket, client_name):
         file.write(str(shared_key) + "\n")
     return shared_key
 
+def recieve_message(client_socket, current_client):
+    enc_session_key = client_socket.recv(1024)
+    if not enc_session_key:
+        return None
+    cipher_text = client_socket.recv(1024)
+    nonce = client_socket.recv(1024)
+    
+    rsa_key = current_client["private_key"]
+    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    
+    session_key = cipher_rsa.decrypt(enc_session_key)
+    cipher_aes = AES.new(session_key, AES.MODE_EAX, nonce)
+    message = cipher_aes.decrypt(cipher_text)
+    plaintext = message.decode()
+    return plaintext
 
 def handle_client(client_socket, rsa_keys, dh_keys):
     # Separando o nome e o destinatário
@@ -146,17 +184,7 @@ def handle_client(client_socket, rsa_keys, dh_keys):
             break
 
     if operation == "login" and known:
-        enc_session_key = client_socket.recv(1024)
-        cipher_text = client_socket.recv(1024)
-        nonce = client_socket.recv(1024)
-        
-        rsa_key = current_client["private_key"]
-        cipher_rsa = PKCS1_OAEP.new(rsa_key)
-        
-        session_key = cipher_rsa.decrypt(enc_session_key)
-        cipher_aes = AES.new(session_key, AES.MODE_EAX, nonce)
-        message = cipher_aes.decrypt(cipher_text)
-        plaintext = message.decode()
+        plaintext = recieve_message(client_socket, current_client)
         if plaintext == "auth":
             print("Client", client["name"], "authenticated.")
             client_socket.send("Client authenticated".encode())
@@ -165,7 +193,6 @@ def handle_client(client_socket, rsa_keys, dh_keys):
             client_socket.send("Client failed to authenticate".encode())
             client_socket.close()
             return
-
     elif operation == "register":
         # Caso o cliente não seja conhecido
         if not known:
@@ -197,13 +224,13 @@ def handle_client(client_socket, rsa_keys, dh_keys):
 
     # Recebendo mensagens do cliente
     while True:
-        # TODO - Desencriptar a mensagem do cliente A e enviar para o cliente B encriptada
-        data = client_socket.recv(1024)
-        if not data:
+        # Decriptando a mensagem
+        message = recieve_message(client_socket, current_client)
+        if not message:
             break
-        response = client["dest"] + ": " + data.decode()
+        response = client["dest"] + ": " + message
         # Enviando a mensagem para o destinatário
-        send_message(response, client["dest"], connected_clients)
+        send_message(response, client["dest"], connected_clients, known_clients)
     connected_clients.remove(client_socket)
     client_socket.close()
 
