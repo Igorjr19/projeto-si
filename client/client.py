@@ -11,7 +11,10 @@ import time
 
 operation = sys.argv[1]
 name = sys.argv[2]
-dest = sys.argv[3]
+if operation == "register":
+    dest = ""
+elif operation == "login":
+    dest = sys.argv[3]
 server_host = "localhost"
 
 

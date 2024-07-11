@@ -20,50 +20,56 @@ known_clients = []
 
 def load_keys(rsa_keys_file, dh_keys_file):
     dh_keys = {}
-    with open(dh_keys_file, "r") as file:
-        while True:
-            name = file.readline().strip()
-            if not name:
-                break
-            shared_key = file.readline().strip()
+    try :
+        with open(dh_keys_file, "r") as file:
+            while True:
+                name = file.readline().strip()
+                if not name:
+                    break
+                shared_key = file.readline().strip()
 
-            dh_keys[name] = shared_key
+                dh_keys[name] = shared_key
+    except:
+        pass
     rsa_keys = []
-    with open(rsa_keys_file, "r") as file:
-        file_len = len(file.readlines())
-        file.seek(0)
-        i = 0
-        while True:
-            if i >= file_len:
-                break
-            i += 1
-            name = file.readline().strip()
-            if not name:
-                continue
-            private_key_lines = []
-            public_key_lines = []
+    try :
+        with open(rsa_keys_file, "r") as file:
+            file_len = len(file.readlines())
+            file.seek(0)
+            i = 0
             while True:
-                i += 1
-                line = file.readline().strip()
-                private_key_lines.append(line)
-                if line == "-----END ENCRYPTED PRIVATE KEY-----":
+                if i >= file_len:
                     break
-            while True:
                 i += 1
-                line = file.readline().strip()
-                public_key_lines.append(line)
-                if line == "-----END PUBLIC KEY-----":
-                    break
-            public_key_lines = "\n".join(public_key_lines) + "\n"
-            private_key_lines = "\n".join(private_key_lines) + "\n"
-            secret_key = dh_keys[name]
-            key = {
-                "name": name,
-                "private_key": RSA.import_key(private_key_lines, passphrase=secret_key),
-                "public_key": RSA.import_key(public_key_lines, passphrase=secret_key),
-            }
-            rsa_keys.append(key)
-        return rsa_keys, dh_keys
+                name = file.readline().strip()
+                if not name:
+                    continue
+                private_key_lines = []
+                public_key_lines = []
+                while True:
+                    i += 1
+                    line = file.readline().strip()
+                    private_key_lines.append(line)
+                    if line == "-----END ENCRYPTED PRIVATE KEY-----":
+                        break
+                while True:
+                    i += 1
+                    line = file.readline().strip()
+                    public_key_lines.append(line)
+                    if line == "-----END PUBLIC KEY-----":
+                        break
+                public_key_lines = "\n".join(public_key_lines) + "\n"
+                private_key_lines = "\n".join(private_key_lines) + "\n"
+                secret_key = dh_keys[name]
+                key = {
+                    "name": name,
+                    "private_key": RSA.import_key(private_key_lines, passphrase=secret_key),
+                    "public_key": RSA.import_key(public_key_lines, passphrase=secret_key),
+                }
+                rsa_keys.append(key)
+    except:
+        pass
+    return rsa_keys, dh_keys
 
 
 def encrypt_and_save_keys(client_name, key, filename, secret_key):
@@ -167,11 +173,19 @@ def handle_client(client_socket, rsa_keys, dh_keys):
     operation = args[0]
 
     # Adicionando o cliente à lista de clientes
-    client = {
-        "socket": client_socket,
-        "name": args[1],
-        "dest": args[2],
-    }
+    operation = args[0]
+    if operation == "login":
+        client = {
+            "socket": client_socket,
+            "name": args[1],
+            "dest": args[2],
+        }
+    else:
+        client = {
+            "socket": client_socket,
+            "name": args[1],
+            "dest": "",
+        }
     connected_clients.append(client)
 
     # Verificando se o cliente é conhecido
@@ -228,10 +242,13 @@ def handle_client(client_socket, rsa_keys, dh_keys):
         message = recieve_message(client_socket, current_client)
         if not message:
             break
-        response = client["dest"] + ": " + message
+        response = client["name"] + ": " + message
         # Enviando a mensagem para o destinatário
         send_message(response, client["dest"], connected_clients, known_clients)
-    connected_clients.remove(client_socket)
+    try :
+        known_clients.remove(current_client)
+    except:
+        pass
     client_socket.close()
 
 
